@@ -1,13 +1,3 @@
-已经根据 `main.py` 的完整功能重写了 README，内容涵盖了 OLED 界面特性、播放控制逻辑、元数据解析、歌词系统、Windows 11 标题栏 API 等技术细节，以及文件组织建议和打包说明。
-
-**下载链接：** [README.md](sandbox:///mnt/agents/output/README.md)
-
----
-
-以下是重写后的完整内容预览：
-
----
-
 # Just Music — OLED 风格本地音乐播放器
 
 一款基于 PyQt6 开发的 Windows 本地音乐播放器，采用纯黑 OLED 风格界面设计，支持多种音频格式与内嵌/外挂歌词，追求极简视觉与纯粹播放体验。
