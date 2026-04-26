@@ -44,7 +44,21 @@
 
 ---
 
+## 📥 直接下载（无需编译）
+
+如果你不想安装 Python 或自己打包，可以直接下载编译好的版本：
+
+👉 **[前往 Releases 页面下载最新版](https://github.com/Lucasky-blue/Just-MuJic/releases)**
+
+下载 `Just-Music-v*-windows.zip`，解压后双击 `Just Music.exe` 即可运行。
+
+> ⚠️ **单目录模式**：请解压整个压缩包后运行，勿单独移动 `Just Music.exe`，否则依赖会丢失。
+
+---
+
 ## 📦 依赖要求
+
+如果你想从源码运行或二次开发，需要安装以下依赖：
 
 ```
 PyQt6>=6.4
@@ -55,7 +69,7 @@ mutagen>=1.46
 
 ---
 
-## 🚀 快速开始
+## 🚀 从源码运行
 
 ### 1. 安装依赖
 
@@ -71,7 +85,7 @@ python main.py
 
 程序启动后会自动加载默认路径：
 ```
-C:\Users\hp\Music\Just Music
+C:\Users\你的用户名\Music\Just Music
 ```
 若路径不存在，可通过侧边栏 **"🔄 扫描文件夹"** 手动指定音乐目录。
 
@@ -105,9 +119,9 @@ Just Music/
 
 ---
 
-## 📋 打包为可执行文件
+## 📋 自行打包为可执行文件
 
-使用 PyInstaller 单文件发布：
+如果你想自己打包，使用 PyInstaller：
 
 ```bash
 pyinstaller --onefile --windowed --name "JustMusic" main.py
