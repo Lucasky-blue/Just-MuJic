@@ -1,4 +1,4 @@
-# Just Music — OLED 风格本地音乐播放器
+# Just MuJic — OLED 风格本地音乐播放器
 
 一款基于 PyQt6 开发的 Windows 本地音乐播放器，采用纯黑 OLED 风格界面设计，支持多种音频格式与内嵌/外挂歌词，追求极简视觉与纯粹播放体验。
 
