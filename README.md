@@ -1,4 +1,4 @@
-# Just MuJic — OLED 风格本地音乐播放器
+# Just Music — OLED 风格本地音乐播放器
 
 一款基于 PyQt6 开发的 Windows 本地音乐播放器，采用纯黑 OLED 风格界面设计，支持多种音频格式与内嵌/外挂歌词，追求极简视觉与纯粹播放体验。
 
@@ -15,6 +15,7 @@
 - **非线性音量控制**：采用平方曲线映射，更符合人耳响度感知
 - **记忆用户文件夹**：自动记住上次选择的音乐目录，下次启动直接加载
 - **矢量图标控件**：播放/暂停/切歌/文件夹/窗口控制均采用 `QPainter` 自绘，无位图资源依赖
+- **内置字体回退**：优先使用更纱黑体（SarasaUiSC）渲染界面，缺失时自动回退至系统默认微软雅黑
 - **智能封面回退**：内嵌封面 → 同目录同名 `.jpg` → `cover.jpg`
 
 ---
@@ -67,9 +68,9 @@
 
 👉 **[前往 Releases 页面下载最新版](https://github.com/Lucasky-blue/Just-MuJic/releases)**
 
-下载 `Just-Music-v*-windows.zip`，解压后双击 `Just Music.exe` 即可运行。
+下载 `Just-Music-v*.exe`，双击即可运行。
 
-> ⚠️ **单目录模式**：请解压整个压缩包后运行，勿单独移动 `Just Music.exe`，否则依赖会丢失。
+> ⚠️ **单文件模式**：所有依赖已打包进可执行文件，无需额外安装或解压。
 
 ---
 
@@ -96,12 +97,12 @@ pip install PyQt6 mutagen
 
 ### 2. 准备字体（可选）
 
-程序会尝试加载同目录下的更纱黑体字体文件以获得最佳显示效果：
+程序内置字体回退机制：优先使用更纱黑体（SarasaUiSC），若打包时未内嵌或运行环境缺失，则自动回退至系统默认的 `Microsoft YaHei`。
+
+源码运行时，可将以下字体文件置于源码同级目录，打包工具会自动将其内嵌：
 
 - `SarasaUiSC-Regular.ttf`
 - `SarasaUiSC-Bold.ttf`
-
-若字体文件不存在，将自动回退至系统默认的 `Microsoft YaHei`。
 
 ### 3. 运行
 
@@ -145,7 +146,7 @@ Just Music/
 | `Island` | 卡片式容器，统一圆角、背景色与边框，构建模块化布局 |
 | `DraggableMixin` | 无边框窗口拖动支持，通过 `mousePressEvent` / `mouseMoveEvent` 实现 |
 | `QSettings` | 持久化用户最后选择的音乐文件夹路径 |
-| `resource_path` | 兼容 PyInstaller 打包后的资源路径解析 |
+| `resource_path` | 兼容 PyInstaller `--onefile` 打包后的资源路径解析 |
 | 进度预览 | `sliderMoved` 时计算预览毫秒数，实时驱动歌词更新，释放后跳转 |
 
 ---
@@ -165,6 +166,7 @@ pyinstaller --onefile --windowed --name "JustMusic" main.py
 ## 🔮 未来扩展方向
 
 - [ ] **SQLite 曲库索引**：避免每次全量扫描，支持搜索与排序
+- [ ] **详情页抽屉**：点击歌曲滑出全屏封面、滚动歌词、专辑信息（仿 QQ 音乐）
 - [ ] **全局快捷键**：注册系统热键控制播放/暂停/切歌
 - [ ] **频谱可视化**：基于 `QAudioProbe` 或 `QPainter` 绘制实时波形
 - [ ] **播放列表管理**：支持队列编辑、循环/随机模式
