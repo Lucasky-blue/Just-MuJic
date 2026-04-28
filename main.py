@@ -10,12 +10,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     Qt, QTimer, QUrl, QSize, QRectF, QPropertyAnimation,
     QEasingCurve, pyqtProperty, pyqtSignal, QPoint, QRect, QParallelAnimationGroup,
-    QSettings
+    QSettings, QSequentialAnimationGroup
 )
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtGui import (
     QFont, QPixmap, QPainter, QPainterPath, QColor, QPen,
-    QFontDatabase, QCursor, QBrush, QRegion
+    QFontDatabase, QCursor, QBrush, QRegion, QTextOption
 )
 try:
     from mutagen.mp3 import MP3
@@ -50,6 +50,120 @@ class DraggableMixin:
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
         super().mouseReleaseEvent(event)
+
+# ── 滚动标签（跑马灯效果）────────────────────────────────────────
+class RollingLabel(QLabel):
+    """自动左右滚动文本的标签，超出宽度时启动往返滚动动画。"""
+
+    def __init__(self, text_color=C_WHITE, parent=None):
+        super().__init__(parent)
+        self._offset = 0.0
+        self._text_width = 0
+        self._label_width = 0
+        self._anim_group = None
+        self._rolling = False
+        self._text_color = text_color
+        self._margin = 0
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setStyleSheet("background: transparent;")
+        self.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        return QSize(min(hint.width(), 160), hint.height())
+
+    def setText(self, text):
+        super().setText(text)
+        self._update_metrics()
+        self._check_and_roll()
+
+    def setTextColor(self, color):
+        self._text_color = color
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_metrics()
+        self._check_and_roll()
+
+    def _update_metrics(self):
+        if not self.text():
+            self._text_width = 0
+            self._label_width = self.width()
+            return
+        fm = self.fontMetrics()
+        self._text_width = fm.horizontalAdvance(self.text())
+        self._label_width = self.width()
+        if self._label_width <= 0:
+            self._label_width = self.sizeHint().width()
+
+    def _check_and_roll(self):
+        need_roll = (self._text_width + self._margin * 2) > self._label_width
+        if need_roll:
+            if not self._rolling:
+                self._start_roll()
+        else:
+            if self._rolling:
+                self._stop_roll()
+                self._offset = 0
+                self.update()
+
+    def _start_roll(self):
+        if self._anim_group:
+            self._stop_roll()
+        max_offset = self._text_width + self._margin * 2 - self._label_width
+        if max_offset <= 0:
+            return
+        anim_forward = QPropertyAnimation(self, b"scrollOffset")
+        anim_forward.setDuration(4000)
+        anim_forward.setStartValue(0.0)
+        anim_forward.setEndValue(float(max_offset))
+        anim_forward.setEasingCurve(QEasingCurve.Type.Linear)
+        anim_backward = QPropertyAnimation(self, b"scrollOffset")
+        anim_backward.setDuration(4000)
+        anim_backward.setStartValue(float(max_offset))
+        anim_backward.setEndValue(0.0)
+        anim_backward.setEasingCurve(QEasingCurve.Type.Linear)
+        self._anim_group = QSequentialAnimationGroup()
+        self._anim_group.addAnimation(anim_forward)
+        self._anim_group.addAnimation(anim_backward)
+        self._anim_group.setLoopCount(-1)
+        self._anim_group.start()
+        self._rolling = True
+
+    def _stop_roll(self):
+        if self._anim_group:
+            self._anim_group.stop()
+            self._anim_group.deleteLater()
+            self._anim_group = None
+        self._rolling = False
+
+    def get_scrollOffset(self) -> float:
+        return self._offset
+
+    def set_scrollOffset(self, offset: float):
+        self._offset = offset
+        self.update()
+
+    scrollOffset = pyqtProperty(float, get_scrollOffset, set_scrollOffset)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QColor(self._text_color))
+        painter.setClipRect(self.rect())
+        rect = self.rect()
+        x = int(rect.x() - self._offset + self._margin)
+        fm = self.fontMetrics()
+        text_y = rect.center().y() + fm.ascent() // 2 - 2
+        painter.drawText(x, text_y, self.text())
+        if self._rolling and self._text_width > self._label_width:
+            x2 = int(x + self._text_width + self._margin)
+            painter.drawText(x2, text_y, self.text())
 
 # ── 圆角封面 ────────────────────────────────────────────────
 class RoundedLabel(QLabel):
@@ -177,7 +291,6 @@ class LRCParser:
             return
         raw = ""
         if is_file and os.path.exists(source):
-            # 依次尝试 UTF-8 / UTF-8-BOM / GBK / GB2312
             for enc in ('utf-8', 'utf-8-sig', 'gbk', 'gb2312'):
                 try:
                     with open(source, 'r', encoding=enc) as f:
@@ -195,13 +308,11 @@ class LRCParser:
             line = line.strip()
             if not line:
                 continue
-            # 兼容 [mm:ss], [mm:ss.x], [mm:ss.xx], [mm:ss.xxx], [mm:ss:xx]
             times = re.findall(r'\[(\d{1,2}):(\d{2})(?:[\.:](\d{1,3}))?\]', line)
             content = re.sub(r'\[\d{1,2}:\d{2}(?:[\.:]\d{1,3})?\]', '', line).strip()
             for m, s, ms in times:
                 t = int(m) * 60000 + int(s) * 1000
                 if ms:
-                    # 统一毫秒：1位→100ms, 2位→10ms, 3位→1ms
                     ms_str = ms.ljust(3, '0')[:3]
                     t += int(ms_str)
                 if content:
@@ -239,7 +350,6 @@ class Song:
         self.lrc = None
         self._load_all()
     def _load_all(self):
-        """Load metadata, cover, and lyrics in one pass (FLAC opened once)."""
         ext = self.path.lower()
         lrc_loaded = False
         if not MUTAGEN_AVAILABLE:
@@ -281,7 +391,6 @@ class Song:
                 embedded_lrc = audio.get('lyrics', [""])[0]
                 if embedded_lrc:
                     self.lrc = LRCParser(source=embedded_lrc, is_file=False)
-                    # 只有解析出有效时间戳才视为加载成功
                     if self.lrc.lines:
                         lrc_loaded = True
             elif ext.endswith('.wav'):
@@ -404,12 +513,12 @@ class SongItem(QWidget):
         info = QVBoxLayout()
         info.setSpacing(2)
         info.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.title_lbl = QLabel(str(song.title))
-        self.title_lbl.setStyleSheet(f"color: {C_WHITE}; font-size: 12px; font-weight: 600; background: transparent;")
-        self.title_lbl.setMaximumWidth(220)
-        self.artist_lbl = QLabel(str(song.artist))
-        self.artist_lbl.setStyleSheet(f"color: {C_DIM}; font-size: 11px; background: transparent;")
-        self.artist_lbl.setMaximumWidth(220)
+        self.title_lbl = RollingLabel(text_color=C_WHITE)
+        self.title_lbl.setText(str(song.title))
+        self.title_lbl.setStyleSheet("font-size: 12px; font-weight: 600;")
+        self.artist_lbl = RollingLabel(text_color=C_DIM)
+        self.artist_lbl.setText(str(song.artist))
+        self.artist_lbl.setStyleSheet("font-size: 11px;")
         info.addWidget(self.title_lbl)
         info.addWidget(self.artist_lbl)
         layout.addLayout(info, stretch=1)
@@ -437,7 +546,7 @@ class ScanlineOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._spacing = 3          # 光栅条间距（像素）
+        self._spacing = 3
         self._color = QColor(0, 0, 0, 90)
 
     def paintEvent(self, event):
@@ -446,12 +555,8 @@ class ScanlineOverlay(QWidget):
         for y in range(0, self.height(), self._spacing):
             painter.drawLine(0, y, self.width(), y)
 
-# ── 双行歌词视图（仅显示当前行 + 下一行，滚动切换）───────────
+# ── 双行歌词视图 ────────────────────────────────────────────
 class LyricsView(QWidget):
-    """
-    双行歌词视图（修复居中 + 动画稳定）
-    """
-
     LINE_H   = 26
     GAP      = 10
     PAD_V    = 14
@@ -468,13 +573,13 @@ class LyricsView(QWidget):
         total_h = self.PAD_V * 2 + self.LINE_H * 2 + self.GAP
         self.setFixedHeight(total_h)
 
-        # ── 两个可见标签 ──────────────────────────────
         self._lbl_cur  = QLabel(self)
         self._lbl_next = QLabel(self)
         for lbl in (self._lbl_cur, self._lbl_next):
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setFixedHeight(self.LINE_H)
             lbl.setWordWrap(False)
+            lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
         self._lbl_cur.setStyleSheet(
             "color:#FFFFFF; font-size:15px; font-weight:600; background:transparent;")
@@ -486,13 +591,9 @@ class LyricsView(QWidget):
         self._lbl_cur.move(0, self._cur_y)
         self._lbl_next.move(0, self._next_y)
 
-        # 光栅条覆盖层
         self._scanline = ScanlineOverlay(self)
         self._scanline.raise_()
-
         self._anim_group = None
-
-    # ── 公开接口 ──────────────────────────────────────
 
     def set_lyrics_list(self, lines):
         self._stop_animation()
@@ -526,18 +627,16 @@ class LyricsView(QWidget):
             self._pending_idx = idx
             return
 
-        # 前进一句，执行滚动动画
         if idx == self._cur_idx + 1 and self._next_idx == idx:
             self._animating = True
             new_next_text = (
                 self._lines[idx + 1][1] if idx + 1 < len(self._lines) else ""
             )
 
-            # 创建临时标签（新下一句，从底部滑入）
             self._temp_label = QLabel(self)
             self._temp_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._temp_label.setFixedHeight(self.LINE_H)
-            self._temp_label.setFixedWidth(self.width())          # ★ 设置宽度
+            self._temp_label.setFixedWidth(self.width())
             self._temp_label.setWordWrap(False)
             self._temp_label.setStyleSheet(
                 "color:#444444; font-size:13px; background:transparent;")
@@ -547,7 +646,6 @@ class LyricsView(QWidget):
             self._temp_label.move(0, start_temp_y)
             self._temp_label.show()
 
-            # 新建动画对象（每次新建，避免复用已销毁对象）
             anim_cur = QPropertyAnimation(self._lbl_cur, b"pos")
             anim_next = QPropertyAnimation(self._lbl_next, b"pos")
             anim_temp = QPropertyAnimation(self._temp_label, b"pos")
@@ -556,15 +654,10 @@ class LyricsView(QWidget):
                 anim.setDuration(280)
                 anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-            # 当前句向上移出
             anim_cur.setStartValue(QPoint(0, self._cur_y))
             anim_cur.setEndValue(QPoint(0, self._cur_y - self.LINE_H - self.GAP))
-
-            # 下一句移到当前句位置
             anim_next.setStartValue(QPoint(0, self._next_y))
             anim_next.setEndValue(QPoint(0, self._cur_y))
-
-            # 临时标签移到下一句位置
             anim_temp.setStartValue(QPoint(0, start_temp_y))
             anim_temp.setEndValue(QPoint(0, self._next_y))
 
@@ -576,10 +669,8 @@ class LyricsView(QWidget):
 
             self._cur_idx = idx
             self._next_idx = idx + 1 if idx + 1 < len(self._lines) else -1
-
             self._anim_group.start()
         else:
-            # 跳跃/后退，直接跳转
             self._stop_animation()
             self._cur_idx = idx
             self._next_idx = idx + 1 if idx + 1 < len(self._lines) else -1
@@ -591,32 +682,20 @@ class LyricsView(QWidget):
             self._lbl_cur.move(0, self._cur_y)
             self._lbl_next.move(0, self._next_y)
 
-    # ── 动画结束 ──────────────────────────────────────
-
     def _on_anim_finished(self):
         self._animating = False
-
-        # 清理临时标签
         if hasattr(self, '_temp_label'):
             self._temp_label.deleteLater()
             del self._temp_label
-
-        # 确保最终文字正确
         if 0 <= self._cur_idx < len(self._lines):
             self._lbl_cur.setText(self._lines[self._cur_idx][1])
         if 0 <= self._next_idx < len(self._lines):
             self._lbl_next.setText(self._lines[self._next_idx][1])
-
-        # 把两个标签的位置精确归位
         self._lbl_cur.move(0, self._cur_y)
         self._lbl_next.move(0, self._next_y)
-
-        # 销毁动画组
         if self._anim_group:
             self._anim_group.deleteLater()
             self._anim_group = None
-
-        # 处理积压请求
         if self._pending_idx != -1:
             pending = self._pending_idx
             self._pending_idx = -1
@@ -632,8 +711,6 @@ class LyricsView(QWidget):
             del self._temp_label
         self._animating = False
 
-    # ── 辅助 ──────────────────────────────────────────
-
     def _set_text_safe(self, cur_text, next_text):
         self._lbl_cur.setText(cur_text)
         self._lbl_next.setText(next_text)
@@ -643,7 +720,6 @@ class LyricsView(QWidget):
         w = self.width()
         self._lbl_cur.setFixedWidth(w)
         self._lbl_next.setFixedWidth(w)
-        # 如果动画期间尺寸改变（极少发生），同步临时标签宽度
         if hasattr(self, '_temp_label') and self._temp_label is not None:
             try:
                 self._temp_label.setFixedWidth(w)
@@ -654,12 +730,10 @@ class LyricsView(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), self._radius, self._radius)
         painter.setClipPath(path)
         painter.fillRect(self.rect(), QColor(C_ISLAND))
-
         painter.setClipping(False)
         pen = QPen(QColor(C_BORDER))
         pen.setWidth(1)
@@ -692,9 +766,7 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self._tick)
         self.timer.start(1000)
 
-        # 歌词滚动辅助
         self._last_idx = -1
-
         self._setup_ui()
         self._connect_signals()
         last_folder = self.settings.value("last_folder", "")
@@ -747,14 +819,15 @@ class MainWindow(QMainWindow):
         info_layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignTop)
         meta_layout = QVBoxLayout()
         meta_layout.setSpacing(3)
-        self.title_label = QLabel("未在播放")
-        self.title_label.setStyleSheet(f"color: {C_WHITE}; font-size: 18px; font-weight: 700; background: transparent;")
-        self.date_label = QLabel("")
-        self.date_label.setStyleSheet(f"color: {C_DIM}; font-size: 11px; background: transparent;")
-        self.artist_label = QLabel("选择一首歌曲")
-        self.artist_label.setStyleSheet(f"color: {C_MID}; font-size: 12px; background: transparent;")
-        self.album_label = QLabel("")
-        self.album_label.setStyleSheet(f"color: {C_DIM}; font-size: 11px; background: transparent;")
+        self.title_label = RollingLabel(text_color=C_WHITE)
+        self.title_label.setStyleSheet("font-size: 18px; font-weight: 700;")
+        self.title_label.setText("未在播放")
+        self.date_label = RollingLabel(text_color=C_DIM)
+        self.date_label.setStyleSheet("font-size: 11px;")
+        self.artist_label = RollingLabel(text_color=C_MID)
+        self.artist_label.setStyleSheet("font-size: 12px;")
+        self.album_label = RollingLabel(text_color=C_DIM)
+        self.album_label.setStyleSheet("font-size: 11px;")
         meta_layout.addWidget(self.title_label)
         meta_layout.addWidget(self.date_label)
         meta_layout.addWidget(self.artist_label)
@@ -796,7 +869,6 @@ class MainWindow(QMainWindow):
         prog_row.setSpacing(8)
         self.progress = QSlider(Qt.Orientation.Horizontal)
         self.progress.setRange(0,1000)
-        # 改进后的进度条样式（手柄透明但保留大小，便于拖拽）
         self.progress.setStyleSheet("""
             QSlider::groove:horizontal { height:4px; background:#181818; border-radius:2px; }
             QSlider::sub-page:horizontal { background:white; border-radius:2px; }
@@ -817,7 +889,7 @@ class MainWindow(QMainWindow):
         ctrl_layout.addLayout(prog_row)
         self.body_layout.addWidget(ctrl_island)
 
-        # 歌词视图（新版）
+        # 歌词视图
         self.lyrics_view = LyricsView()
         self.body_layout.addWidget(self.lyrics_view)
 
@@ -916,7 +988,6 @@ class MainWindow(QMainWindow):
         self.current_index = idx
         self.play_song(self.songs[idx])
 
-    # 更新后的 play_song（支持新版歌词列表）
     def play_song(self, song):
         self.player.setSource(QUrl.fromLocalFile(song.path))
         self.player.play()
@@ -933,7 +1004,6 @@ class MainWindow(QMainWindow):
         else:
             self.cover_label.clear_pixmap()
         self.desc_label.setText(song.description if song.description else "暂无歌曲赏析。")
-        # 初始化歌词列表
         if song.lrc and song.lrc.lines:
             self.lyrics_view.set_lyrics_list(song.lrc.lines)
         else:
@@ -1010,13 +1080,11 @@ class MainWindow(QMainWindow):
     def _change_volume(self, val):
         self.audio_output.setVolume((val/100.0)**2)
 
-    # 基于 get_index 的歌词更新（修复初始高亮）
     def _update_lyric_display(self, pos_ms):
         if 0 <= self.current_index < len(self.songs):
             song = self.songs[self.current_index]
             if song.lrc and song.lrc.lines:
                 idx = song.lrc.get_index(pos_ms)
-                # 如果刚开始且没匹配到（歌词不是从 0 秒开始），默认高亮第一行
                 if idx == -1 and pos_ms < 2000:
                     idx = 0
                 if idx == self._last_idx:
@@ -1024,21 +1092,22 @@ class MainWindow(QMainWindow):
                 self._last_idx = idx
                 if idx != -1:
                     self.lyrics_view.set_index(idx)
-                return
-        # 无歌词时不更新高亮
-        pass
 
     def _highlight_list_item(self):
         for i,w in enumerate(self._song_widgets):
             is_cur = (i == self.current_index)
-            w.title_lbl.setStyleSheet(f"color:{C_WHITE}; font-size:12px; font-weight:{'700' if is_cur else '600'}; background:transparent;")
-            w.artist_lbl.setStyleSheet(f"color:{'#AAAAAA' if is_cur else C_DIM}; font-size:11px; background:transparent;")
+            title_color = C_WHITE if is_cur else C_WHITE
+            artist_color = "#AAAAAA" if is_cur else C_DIM
+            w.title_lbl.setTextColor(title_color)
+            w.artist_lbl.setTextColor(artist_color)
+            font = w.title_lbl.font()
+            font.setWeight(700 if is_cur else 600)
+            w.title_lbl.setFont(font)
 
     def closeEvent(self, event):
         self.settings.sync()
         super().closeEvent(event)
 
-# ── 入口 ────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
